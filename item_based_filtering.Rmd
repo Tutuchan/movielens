@@ -1,0 +1,96 @@
+---
+title: "Item-based Collaborative Filtering Recommendation Algorithms"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(magrittr)
+
+ratings <- read_csv("data/ratings.csv")
+movies <- read_csv("data/movies.csv")
+tags <- read_csv("data/tags.csv")
+
+user_ids <- unique(ratings$userId)
+```
+
+```{r}
+average_user_ratings <- ratings %>% 
+    group_by(userId) %>% 
+    summarize(m = mean(rating))
+
+average_item_ratings <- ratings %>% 
+    group_by(movieId) %>% 
+    summarize(m = mean(rating))
+```
+
+
+```{r}
+norm <- function(x) sqrt(sum(x^2, na.rm = TRUE))
+dotprod <- function(x, y) sum(x * y, na.rm = TRUE)
+
+helper_similarity <- function(ratings, idx, idy, averages) {
+  movies <- ratings %>% 
+    filter(movieId %in% c(idx, idy))
+  
+  common_users <- movies %>% 
+    count(userId) %>% 
+    filter(n == 2) %$% 
+    userId
+  
+  common_by = intersect(names(movies), names(averages))
+  
+  
+  u <- movies %>% 
+    filter(userId %in% common_users) %>% 
+    inner_join(averages, by = common_by) %>%
+    mutate(r = rating - m) %>% 
+    select(userId, movieId, r) %>% 
+    spread(key = movieId, r)
+  
+  names(u)[-1] <- c("movie1", "movie2")
+  
+  dotprod(u$movie1, u$movie2) / ((norm(u$movie1) * norm(u$movie2)))
+}
+
+cosine_similarity <- function(ratings, idx, idy) {
+  movies <- ratings %>% 
+    filter(movieId %in% c(idx, idy)) %>% 
+    select(userId, movieId, rating) %>% 
+    spread(key = movieId, rating)
+  
+  names(movies)[-1] <- c("movie1", "movie2")
+  
+  dotprod(movies$movie1, movies$movie2) / (norm(movies$movie1) * norm(movies$movie2))
+}
+
+correlation_similarity <- 
+  function(ratings, idx, idy) helper_similarity(ratings, idx, idy, average_item_ratings)
+
+adjusted_cosine_similarity <- 
+  function(ratings, idx, idy) helper_similarity(ratings, idx, idy, average_user_ratings)
+```
+
+```{r}
+compute_all_similarities <- function(ratings, similarity_function) {
+  unique_ids <- unique(ratings$movieId)
+  
+  lapply(seq_along(unique_ids), function(i) {
+    cat(sprintf("%s ...\n", i))
+    lapply(seq_along(unique_ids[-(1:i)]), function(j) {
+      list(id1 = i, id2 = j, sim = similarity_function(ratings, unique_ids[i], unique_ids[i + j]))
+    }) %>% 
+      bind_rows()
+  }) %>% 
+    bind_rows()
+}
+
+cosine_similarities <- compute_all_similarities(ratings, cosine_similarity)
+
+correlation_similarities <- compute_all_similarities(ratings, correlation_similarity)
+
+adjusted_cosine_similarities <- compute_all_similarities(ratings, adjusted_cosine_similarity)
+
+
+```
+
